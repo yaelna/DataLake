@@ -3,7 +3,8 @@ import com.gigaspaces.document.SpaceDocument;
 import com.gigaspaces.metadata.SpaceTypeDescriptor;
 import com.gigaspaces.metadata.SpaceTypeDescriptorBuilder;
 import org.apache.openjpa.util.UnsupportedException;
-import org.omg.IOP.FORWARDED_IDENTITY;
+import org.openspaces.admin.Admin;
+import org.openspaces.admin.AdminFactory;
 import org.openspaces.core.GigaSpace;
 import org.openspaces.core.executor.DistributedTask;
 import org.openspaces.core.executor.TaskGigaSpace;
@@ -23,7 +24,9 @@ public class Main {
     private static File csv = new File("/home/yaeln-pcu/IdeaProjects/DataLakeTaskLoading/src/main/resources/fhv_tripdata_2015-01.csv");
 
     public static void main(String[] args) throws IOException {
-        LoadingTask task = new LoadingTask(null, csv, "MyRow");
+        Admin admin = new AdminFactory().createAdmin();
+        GigaSpace gigaSpace = admin.getSpaces().getSpaceByName("fastDataLake").getGigaSpace();
+        LoadingTask task = new LoadingTask(gigaSpace, csv, "MyRow");
         try {
             task.execute();
         } catch (Exception e) {
@@ -42,8 +45,8 @@ public class Main {
         private int partitionZeroInitialPos;
         private static long fileNetSize;
 
-        public LoadingTask(GigaSpace gigaSpace, File csv, String typeName) throws IOException {
-            if(csv.length() == 0) throw new UnsupportedException("Invalid csv file was submitted, file is empty");
+        LoadingTask(GigaSpace gigaSpace, File csv, String typeName) throws IOException {
+            if (csv.length() == 0) throw new UnsupportedException("Invalid csv file was submitted, file is empty");
             this.gigaSpace = gigaSpace;
             this.csv = csv;
             this.typeName = typeName;
@@ -55,7 +58,7 @@ public class Main {
             String header = reader.readLine();
             String[] strings = header.split(",");
             this.partitionZeroInitialPos = header.length();
-            this.fileNetSize = csv.length() - partitionZeroInitialPos - 2;
+            fileNetSize = csv.length() - partitionZeroInitialPos - 2;
             reader.close();
             return Arrays.asList(strings);
         }
@@ -65,19 +68,20 @@ public class Main {
         }
 
         public Integer execute() throws Exception {
-            if(fileNetSize <= 0) return null;
+
+            SpaceTypeDescriptor typeDescriptor = new SpaceTypeDescriptorBuilder(typeName).routingProperty("Partition").create();
+            gigaSpace.getTypeManager().registerTypeDescriptor(typeDescriptor);
+            if (fileNetSize <= 0) return null;
             int chunk = (int) fileNetSize / partitions;
-            int initialStartPos = partitionZeroInitialPos + chunk*myPartitionId;
+            int initialStartPos = partitionZeroInitialPos + chunk * myPartitionId;
             byte[] bytes = getBytes(chunk, initialStartPos);
             int i = findStart(bytes);
-            SpaceTypeDescriptor typeDescriptor = new SpaceTypeDescriptorBuilder(typeName).routingProperty("Partition").create();
-//            gigaSpace.getTypeManager().registerTypeDescriptor(typeDescriptor);
             boolean stop = false;
-            while (i> 0 && i < bytes.length) {
+            while (i > 0 && i < bytes.length) {
                 while (!stop && i < bytes.length && bytes[i] != '\n' && bytes[i] != '\r') { // collect one line
                     Map<String, Object> fields = new HashMap<String, Object>();
                     for (String fieldName : fieldNames) {
-                        List<Character> toString = new ArrayList<>();
+                        List<Character> toString = new ArrayList<Character>();
                         while (i < bytes.length && bytes[i] != ',' && bytes[i] != '\n' && bytes[i] != '\r') {   // collect one field value
                             toString.add((char) bytes[i]);
                             i++;
@@ -103,13 +107,13 @@ public class Main {
 
         private void printBytes(byte[] bytes) {
             for (byte aByte : bytes) {
-                System.out.println("b = "+(char)aByte);
+                System.out.println("b = " + (char) aByte);
             }
         }
 
         private int findStart(byte[] bytes) {
             for (int i = 0; i < bytes.length; i++) {
-                if(bytes[i] == '\n' || bytes[i] == 0){
+                if (bytes[i] == '\n' || bytes[i] == 0) {
                     return i;
                 }
             }
@@ -117,11 +121,11 @@ public class Main {
         }
 
         private byte[] getAdditionalBytes(int initialStartPos) throws IOException {
-            List<Byte> additionalBytes = new ArrayList<>();
-            while (true){
+            List<Byte> additionalBytes = new ArrayList<Byte>();
+            while (true) {
                 byte[] bytes = getBytes(additionalBytesInterval, initialStartPos);
-                for (byte b : bytes){
-                    if(b == 0 || b == '\n'){
+                for (byte b : bytes) {
+                    if (b == 0 || b == '\n') {
                         return toByteArray(additionalBytes);
                     }
                     additionalBytes.add(b);
@@ -153,14 +157,6 @@ public class Main {
             }
             return res;
         }
-
-        private int getFirstNewLineIndex(byte[] bytes) {
-            for (int i = 0; i < bytes.length; i++) {
-                if (bytes[i] == '\n') return i;
-            }
-            return -1;
-        }
-
     }
 
 }
